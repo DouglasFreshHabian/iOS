@@ -1,546 +1,641 @@
-# libimobiledevice in Docker
-
- Build and run the latest upstream **libimobiledevice** stack inside an Ubuntu Docker container without installing the source-built libraries and utilities directly on the host.
-
- This project is intended for experimentation, development, and demonstrations where you want to compare Ubuntu's packaged version of libimobiledevice with the latest version built directly from upstream source.
-
- ## Why Docker?
-
- If you're working with an iPhone or iPad on Ubuntu, you may want to experiment with the latest version of libimobiledevice without replacing or modifying the packages installed on your host system.
-
- A virtual machine isn't ideal for this use case because USB device passthrough can make working with an iPhone considerably more complicated.
-
- Docker gives us a useful middle ground:
-
-```
-┌───────────────────────────────────────────────┐
-│ Ubuntu Host                                   │
-│                                               │
-│  iPhone ──USB──> usbmuxd                      │
-│                    │                          │
-│                    │ /var/run/usbmuxd         │
-│                    ▼                          │
-│          ┌───────────────────────┐             │
-│          │ Docker Container      │             │
-│          │                       │             │
-│          │ libimobiledevice      │             │
-│          │ ideviceinfo           │             │
-│          │ idevice_id            │             │
-│          │ idevicepair           │             │
-│          │ idevicebackup2        │             │
-│          └───────────────────────┘             │
-└───────────────────────────────────────────────┘
-```
-
- The host continues to handle the physical USB connection and `usbmuxd`. The Docker container uses the host's `usbmuxd` Unix socket to communicate with the device.
-
- This means we don't need to pass the physical USB device directly into the container.
-
-## What gets built?
-
-The Dockerfile builds the current upstream versions of the libimobiledevice dependency stack:
-
-- [libplist](<https://github.com/libimobiledevice/libplist>)
-- [libimobiledevice-glue](<https://github.com/libimobiledevice/libimobiledevice-glue>)
-- [libusbmuxd](<https://github.com/libimobiledevice/libusbmuxd>)
-- [libtatsu](<https://github.com/libimobiledevice/libtatsu>)
-- [libimobiledevice](<https://github.com/libimobiledevice/libimobiledevice>)
-
- Everything is installed under:
-
-```
-/opt/libimobiledevice
-```
-
- The Docker image automatically adds:
-
-```
-/opt/libimobiledevice/bin
-```
-
- to `PATH`.
-
- As a result, tools such as `ideviceinfo` and `idevice_id` can be run directly without manually exporting environment variables.
-
- ## Requirements
-
- The host needs:
-
- - Linux
-- Docker
-- A working `usbmuxd` installation
-- An iPhone or iPad connected over USB
-
- Ubuntu 24.04 is used as the base image.
-
- ## Verify usbmuxd on the host
-
- Before using the container, make sure the host can see the device.
-
- For example:
-
-```
-idevice_id -l
-```
-
- If your host already has libimobiledevice installed, this should display the device UDID.
-
- You can also check that the usbmuxd socket exists:
-
-```
-ls -l /var/run/usbmuxd
-```
-
- The important part for this project is that the host has a working:
-
-```
-/var/run/usbmuxd
-```
-
- socket.
-
- ## Build the Docker image
-
- Clone this repository and change into the project directory:
-
-```
-git clone <your-repository-url>
-cd libimobiledevice-docker
-```
-
- Build the image:
-
-```
-docker build -t libimobiledevice-docker .
-```
-
- The Dockerfile downloads the current upstream source repositories and compiles them.
-
- The first build may take several minutes.
-
- ## Run the container
-
- Start the container with the host's `usbmuxd` socket mounted:
-
-```
-docker run -it --rm \
-    -v /var/run/usbmuxd:/var/run/usbmuxd \
-    libimobiledevice-docker
-```
-
- You should now be inside the container.
-
- ## Verify the installation
-
- Check where the tools are coming from:
-
-```
-which ideviceinfo
-```
-
- Expected:
-
-```
-/opt/libimobiledevice/bin/ideviceinfo
-```
-
- Check the version:
-
-```
-ideviceinfo --version
-```
-
- Check for connected devices:
-
-```
-idevice_id -l
-```
-
- You should see the UDID of the connected device.
-
- For example:
-
-```
-00008110-001200A92E63801E
-```
-
- You can also test:
-
-```
-idevicepair validate
-```
-
- and:
-
-```
-idevicebackup2 --version
-```
-
- ## Running individual commands without opening a shell
-
- You don't have to start an interactive shell every time.
-
- For example:
-
-```
-docker run --rm \
-    -v /var/run/usbmuxd:/var/run/usbmuxd \
-    libimobiledevice-docker \
-    ideviceinfo
-```
-
- Or:
-
-```
-docker run --rm \
-    -v /var/run/usbmuxd:/var/run/usbmuxd \
-    libimobiledevice-docker \
-    idevice_id -l
-```
-
- This is useful for scripting.
-
- ## Updating to the latest upstream code
-
- The Dockerfile uses shallow Git clones:
-
-```
-git clone --depth 1
-```
-
- This means a new Docker build retrieves the current tip of each upstream repository.
-
- To rebuild using fresh source:
-
-```
-docker build --no-cache -t libimobiledevice-docker .
-```
-
- Then run the newly built image:
-
-```
-docker run -it --rm \
-    -v /var/run/usbmuxd:/var/run/usbmuxd \
-    libimobiledevice-docker
-```
-
- ### Why `--no-cache`?
-
- Without `--no-cache`, Docker may reuse previously completed build layers.
-
- Using:
-
-```
-docker build --no-cache ...
-```
-
- forces Docker to execute the source download and compilation steps again.
-
- This is useful when you specifically want to test the latest upstream code.
-
- ## Comparing Ubuntu's version with upstream
-
- One of the reasons for this project is to experiment with the difference between the distribution-provided version and the current upstream version.
-
- On Ubuntu, you can inspect the packaged version with:
-
-```
-apt policy libimobiledevice6
-```
-
- and related packages.
-
- The Docker image, on the other hand, contains versions compiled directly from the upstream Git repositories.
-
- For example:
-
-```
-ideviceinfo --version
-```
-
- inside the container reports the source-built version.
-
- This makes it possible to experiment with newer functionality without replacing the Ubuntu packages on the host.
-
- ## Why not a Python virtual environment?
-
- A Python virtual environment such as:
-
-```
-python3 -m venv .venv
-```
-
- isolates Python packages.
-
- libimobiledevice is not a Python package. It is primarily a collection of native C libraries and command-line utilities.
-
- Therefore, a Python virtual environment doesn't isolate the things we actually want to isolate:
-
- - shared libraries
-- native executables
-- system dependencies
-- compiler/build dependencies
-- library search paths
-
- Docker provides the appropriate level of isolation for this experiment.
-
- ## Why not a virtual machine?
-
- A VM would provide stronger isolation, but it also introduces another layer between the physical USB device and libimobiledevice.
-
- For iPhone/iPad work, USB connectivity is particularly important.
-
- With this Docker setup:
-
-```
-iPhone
-   │
-   │ USB
-   ▼
-Ubuntu host
-   │
-   │ usbmuxd socket
-   ▼
-Docker container
-   │
-   ▼
-libimobiledevice
-```
-
- The host retains responsibility for the physical USB connection while the container isolates the libimobiledevice installation.
-
- ## Persistent development container
-
- The examples above use:
-
-```
---rm
-```
-
- which removes the container when it exits.
-
- For development, you may instead want a persistent container:
-
-```
-docker run -it \
-    --name libimobiledevice-source \
-    -v /var/run/usbmuxd:/var/run/usbmuxd \
-    libimobiledevice-docker
-```
-
- After exiting, the container still exists.
-
- List it with:
-
-```
-docker ps -a
-```
-
- Start it again:
-
-```
-docker start libimobiledevice-source
-```
-
- Then open a new shell inside it:
-
-```
-docker exec -it libimobiledevice-source bash
-```
-
- ## Architecture
-
- The important part of this setup is that Docker is **not** handling the physical USB device directly.
-
- Instead:
-
-```
-                 Physical USB
-                     │
-                     ▼
-              ┌─────────────┐
-              │ Ubuntu host │
-              │             │
-              │   usbmuxd   │
-              └──────┬──────┘
-                     │
-             Unix socket
-        /var/run/usbmuxd
-                     │
-                     ▼
-          ┌─────────────────────┐
-          │ Docker container    │
-          │                     │
-          │ libimobiledevice    │
-          │                     │
-          │ idevice_id          │
-          │ ideviceinfo         │
-          │ idevicepair         │
-          │ idevicebackup2      │
-          └─────────────────────┘
-```
-
- The container therefore doesn't need direct access to `/dev/bus/usb`.
-
- ## Troubleshooting
-
- ### `idevice_id: command not found`
-
- Check:
-
-```
-echo "$PATH"
-```
-
- It should contain:
-
-```
-/opt/libimobiledevice/bin
-```
-
- Also check:
-
-```
-ls -l /opt/libimobiledevice/bin/
-```
-
- The Dockerfile sets the environment automatically, so if the image was built from the current Dockerfile, manually exporting `PATH` should not be necessary.
-
- ### The device isn't detected
-
- First check the host:
-
-```
-ls -l /var/run/usbmuxd
-```
-
- Then make sure the socket is mounted into the container:
-
-```
-ls -l /var/run/usbmuxd
-```
-
- inside the container.
-
- Try:
-
-```
-idevice_id -l
-```
-
- If the host's usbmuxd isn't running correctly, the container won't be able to communicate with the phone.
-
- ### Rebuild from scratch
-
- If you're unsure whether Docker is reusing an old build layer:
-
-```
-docker build --no-cache -t libimobiledevice-docker .
-```
-
- ## Security considerations
-
- The container is given access to the host's `usbmuxd` socket:
-
-```
--v /var/run/usbmuxd:/var/run/usbmuxd
-```
-
-That is intentional and is what allows the containerized libimobiledevice tools to communicate with the host's device-management service.
-
-Do not treat the container as a completely isolated environment once host resources such as sockets are explicitly shared with it.
-
-## Project goals
-
-This project is primarily an educational and experimental setup.
-
-It demonstrates how to:
-
-1. Build a native Linux project directly from upstream Git.
-2. Keep that installation isolated from the host.
-3. Use Docker without requiring direct USB passthrough.
-4. Share a Unix socket between the host and container.
-5. Compare distribution packages with current upstream software.
-6. Reproduce the build environment from a Dockerfile.
-
-## Livestream walkthrough
-
- A useful way to demonstrate this project is to build it incrementally:
-
- ### Part 1 — Ubuntu package
-
- Start with the normal Ubuntu installation:
-
-```
-apt install libimobiledevice-utils
-```
-
- Check:
-
-```
-ideviceinfo --version
-```
-
- ### Part 2 — Source build
-
- Build libimobiledevice directly from upstream source inside an Ubuntu container.
-
- Compare:
-
-```
-ideviceinfo --version
-```
-
- and:
-
-```
-idevicebackup2 --version
-```
-
- This demonstrates the difference between the distribution package and the current upstream code.
-
- ### Part 3 — Dockerfile
-
- Turn the manual build process into a Dockerfile:
-
-```
-docker build -t libimobiledevice-docker .
-```
-
- Now the entire build becomes reproducible.
-
- ### Part 4 — USB communication
-
- Run:
-
-```
-docker run -it --rm \
-    -v /var/run/usbmuxd:/var/run/usbmuxd \
-    libimobiledevice-docker
-```
-
- Then:
-
-```
-idevice_id -l
-```
-
- This demonstrates that the container doesn't need direct USB passthrough.
-
- ### Part 5 — Rebuilding
-
- Finally, demonstrate:
-
-```
-docker build --no-cache -t libimobiledevice-docker .
-```
-
- to retrieve and compile the latest upstream code again.
+# 📱 iOS Forensics & Mobile Device Toolkit
+
+A collection of commands and tools for **iOS device forensics, system monitoring, encrypted backup analysis, application inspection, crash report extraction, and password hash auditing** using Linux.
+
+## 📑 Table of Contents
+
+- [🖥️ System Monitoring](#️-system-monitoring)
+- [🐳 Installing Docker](#-installing-docker)
+- [🔬 Installing Mobile Verification Toolkit (MVT)](#-installing-mobile-verification-toolkit-mvt)
+- [🔐 Encrypted iOS Backups](#-encrypted-ios-backups)
+- [📂 AFC File System Access](#-afc-file-system-access)
+- [🔗 Pairing and Device Information](#-pairing-and-device-information)
+- [🛠️ Troubleshooting Pairing Issues](#️-troubleshooting-pairing-issues)
+- [📡 iOS System Logs](#-ios-system-logs)
+- [📲 Device Management](#-device-management)
+- [📦 Installed Applications](#-installed-applications)
+- [🔵 Bluetooth Extended Logging](#-bluetooth-extended-logging)
+- [🧰 Additional pymobiledevice3 Commands](#-additional-pymobiledevice3-commands)
+- [💥 Crash Report Extraction](#-crash-report-extraction)
+- [🔑 Backup Password Hash Extraction](#-backup-password-hash-extraction)
+- [🔓 Password Hash Auditing with Hashcat](#-password-hash-auditing-with-hashcat)
+- [🐳 Running MVT with Docker](#-running-mvt-with-docker)
+- [⚠️ Notes and Best Practices](#️-notes-and-best-practices)
+- [📚 References](#-references)
 
 ---
 
- ## License
+## 🖥️ System Monitoring
 
- This repository contains a Dockerfile and build configuration for projects maintained by the libimobiledevice project.
+Monitor kernel messages and connected USB devices.
 
- The software built by this Dockerfile remains subject to the licenses of its respective upstream projects.
+### Monitor kernel messages in real time
+
+```
+sudo dmesg -w
+
+```
+
+### List connected USB devices
+
+```
+lsusb
+
+```
+
+---
+
+## 🐳 Installing Docker
+
+Install Docker and the Compose plugin on Debian/Ubuntu-based systems.
+
+```
+sudo apt update
+sudo apt install docker.io docker-clean docker-compose-v2
+
+```
+
+Additional Docker packages used in some setups:
+
+```
+sudo apt install docker.io docker-buildx docker-clean
+
+```
+
+Verify the installation:
+
+```
+docker --version
+docker compose version
+
+```
+
+---
+
+## 🔬 Installing Mobile Verification Toolkit (MVT)
+
+MVT is an open-source toolkit for examining mobile device backups and identifying indicators associated with spyware and other threats.
+
+📚 **Official documentation:** https\://docs.mvt.re/en/latest/install/
+
+### 1. Install dependencies
+
+```
+sudo apt update
+sudo apt install python3 python3-venv python3-pip sqlite3 libusb-1.0-0
+
+```
+
+### 2. Install using pipx (recommended)
+
+Install pipx:
+
+```
+sudo apt install pipx
+pipx ensurepath
+
+```
+
+Install or upgrade MVT:
+
+```
+pipx install mvt
+pipx upgrade mvt
+
+```
+
+> 💡 If you have not installed MVT yet, use `pipx install mvt`. Use `pipx upgrade mvt` for subsequent upgrades.
+
+### 3. Install using Python virtual environments
+
+Create and activate a virtual environment:
+
+```
+sudo apt install python3 python3-venv
+
+python3 -m venv mvtEnvironment
+source mvtEnvironment/bin/activate
+
+```
+
+Install MVT:
+
+```
+pip install mvt
+
+```
+
+When finished, deactivate the environment:
+
+```
+deactivate
+
+```
+
+### 4. Enable Bash autocompletion
+
+```
+mvt completion bash --install
+
+```
+
+---
+
+## 🔐 Encrypted iOS Backups
+
+Use `idevicebackup2` to manage iOS backups on a paired device.
+
+### Enable backup encryption
+
+```
+idevicebackup2 -i encryption on
+
+```
+
+Follow the interactive prompts to configure encryption.
+
+### Create a full backup in the current directory
+
+```
+idevicebackup2 backup --full .
+
+```
+
+### Create a full backup in a specified directory
+
+```
+idevicebackup2 backup --full /PATH/TO/BACKUP
+
+```
+
+> ⚠️ Replace `/PATH/TO/BACKUP` with your intended backup directory. Keep the backup password secure; losing it may prevent access to encrypted backup contents.
+
+---
+
+## 📂 AFC File System Access
+
+Use `afcclient` to interact with the device's Apple File Conduit (AFC) service when supported and accessible.
+
+### Start the AFC shell
+
+```
+afcclient
+
+```
+
+### Display device information
+
+```
+afcclient devinfo
+
+```
+
+### List files and directories
+
+```
+afcclient ls
+afcclient ls DCIM/100APPLE/
+
+```
+
+### Inspect file information
+
+```
+afcclient info DCIM/100APPLE/IMG_0001.HEIC
+
+```
+
+### Download a file from the device
+
+```
+afcclient get DCIM/100APPLE/IMG_0001.HEIC
+
+```
+
+### Upload a file to the device
+
+```
+afcclient put pic.png DCIM/100APPLE/
+
+```
+
+> 📌 File access depends on the device, its iOS version, pairing state, and available AFC service permissions.
+
+---
+
+## 🔗 Pairing and Device Information
+
+Use `libimobiledevice` utilities to inspect device details and check pairing status.
+
+### Display basic device information
+
+```
+ideviceinfo -s
+
+```
+
+### List paired devices
+
+```
+idevicepair list
+
+```
+
+### Validate pairing
+
+```
+idevicepair validate
+
+```
+
+### Query a specific device property
+
+```
+ideviceinfo -k ProductVersion
+
+```
+
+Example output:
+
+```
+16.3.1
+
+```
+
+The output depends on the connected device's iOS version.
+
+### Query a specific service domain
+
+```
+ideviceinfo -q com.apple.mobile.battery
+
+```
+
+This queries the specified domain when supported by the installed tool version and device.
+
+---
+
+## 🛠️ Troubleshooting Pairing Issues
+
+Check the status of the USB multiplexing service (`usbmuxd`):
+
+```
+sudo systemctl status usbmuxd
+
+```
+
+Restart the service if necessary:
+
+```
+sudo systemctl stop usbmuxd
+sudo systemctl start usbmuxd
+
+```
+
+Then reconnect the device and validate pairing again:
+
+```
+idevicepair validate
+
+```
+
+> 💡 Make sure the iPhone is unlocked when required, trust prompts have been accepted, and the USB connection is working.
+
+---
+
+## 📡 iOS System Logs
+
+Use `idevicesyslog` to stream device logs and filter output.
+
+### Stream live system logs
+
+```
+idevicesyslog
+
+```
+
+### List available process IDs
+
+```
+idevicesyslog pidlist
+
+```
+
+### Filter logs by process name
+
+```
+idevicesyslog -p wifid
+
+```
+
+The `wifid` filter can help inspect log messages associated with the Wi-Fi daemon.
+
+---
+
+## 📲 Device Management
+
+### Change the device name
+
+```
+idevicename Fresh
+
+```
+
+This attempts to change the device name to `Fresh`.
+
+### Shut down the device
+
+```
+idevicediagnostics shutdown
+
+```
+
+### Restart the device
+
+```
+idevicediagnostics restart
+
+```
+
+> ⚠️ Shutdown and restart commands interrupt device activity. Use them only when appropriate for your investigation.
+
+---
+
+## 📦 Installed Applications
+
+### Install `ideviceinstaller`
+
+Search for the package:
+
+```
+apt search ideviceinstaller
+
+```
+
+Install it:
+
+```
+sudo apt install ideviceinstaller
+
+```
+
+### List all installed applications
+
+```
+ideviceinstaller list --all
+
+```
+
+### List applications using pymobiledevice3
+
+```
+pymobiledevice3 apps list
+
+```
+
+---
+
+## 🔵 Bluetooth Extended Logging
+
+For Bluetooth troubleshooting or extended logging, begin by checking available device logging capabilities.
+
+### Inspect device connectivity
+
+```
+pymobiledevice3 usbmux list
+
+```
+
+### Stream live logs
+
+```
+pymobiledevice3 syslog live
+
+```
+
+> 📌 These commands provide device connectivity and log access. Enabling Bluetooth-specific extended logging may require additional configuration depending on the iOS version, device capabilities, and available developer or diagnostic services.
+
+---
+
+## 🧰 Additional pymobiledevice3 Commands
+
+### List connected devices
+
+```
+pymobiledevice3 usbmux list
+
+```
+
+### Stream live system logs
+
+```
+pymobiledevice3 syslog live
+
+```
+
+### List installed applications
+
+```
+pymobiledevice3 apps list
+
+```
+
+### Display Lockdown information
+
+```
+pymobiledevice3 lockdown info
+
+```
+
+### Pair with a device
+
+```
+pymobiledevice3 lockdown pair
+
+```
+
+Follow any prompts displayed by the tool.
+
+---
+
+## 💥 Crash Report Extraction
+
+Extract crash reports using `idevicecrashreport`:
+
+```
+idevicecrashreport -e -k .
+
+```
+
+This uses the current directory as the destination for extracted reports.
+
+Review the resulting files for relevant timestamps, process names, crash details, and other investigation artifacts.
+
+---
+
+## 🔑 Backup Password Hash Extraction
+
+The following commands illustrate the preparation of backup password hashes for authorized password recovery and security auditing.
+
+### Generate a Hashcat-compatible hash
+
+```
+./itunes_backup2hashcat ../../manifest.plist
+
+```
+
+The exact input file and utility version may affect whether hash extraction succeeds.
+
+### Identify hash formats
+
+```
+hashid
+
+```
+
+Use the resulting hash format information to select an appropriate auditing tool and mode.
+
+---
+
+## 🔓 Password Hash Auditing with Hashcat
+
+Use Hashcat only on password hashes you own or are explicitly authorized to audit.
+
+### Audit an iTunes backup password hash
+
+```
+hashcat -m 14800 -a 0 --force hash.txt passwords.txt
+
+```
+
+- `-m 14800` — selects the Hashcat mode commonly associated with legacy iTunes backup password hashes.
+- `-a 0` — selects dictionary attack mode.
+- `hash.txt` — contains the hash to audit.
+- `passwords.txt` — contains candidate passwords.
+- `--force` — bypasses certain warnings; it is generally better to resolve compatibility issues rather than use it routinely.
+
+**Verify the hash mode against your Hashcat version and the extracted hash format before running an audit.**
+
+### Display recovered passwords
+
+```
+hashcat -m 14800 hash.txt --show
+
+```
+
+### Inspect the Hashcat potfile
+
+```
+cat /home/fresh/.local/share/hashcat/hashcat.potfile
+
+```
+
+The potfile stores previously recovered hashes and their corresponding plaintexts. Protect it as sensitive data.
+
+### Dictionary attack against a general MD5 hash
+
+```
+hashcat -a 0 -m 0 hash.txt rockyou.txt
+
+```
+
+### Dictionary attack with rules
+
+```
+hashcat -a 0 -m 0 hash.txt rockyou.txt -r rules/best64.rule
+
+```
+
+- `-m 0` — selects raw MD5.
+- `rockyou.txt` — the dictionary file.
+- `-r rules/best64.rule` — applies candidate password transformations from the specified rule file.
+
+> ⚠️ **Important:** Hashcat mode `0` is for raw MD5 hashes, not iTunes backup hashes. Select the mode that matches the actual hash format.
+
+---
+
+## 🐳 Running MVT with Docker
+
+Docker can be used to run MVT in an isolated container while exposing a host directory containing an iOS backup.
+
+### 1. Install Docker
+
+```
+sudo apt update
+sudo apt install docker.io docker-buildx docker-clean
+
+```
+
+### 2. Start an interactive MVT container
+
+```
+docker run -it --rm \
+  -v /home/fresh/iOS/Backup/:/mnt \
+  ghcr.io/mvt-project/mvt \
+  /bin/bash
+
+```
+
+Command breakdown:
+
+- `-it` — starts an interactive terminal.
+- `--rm` — removes the container when it exits.
+- `-v /home/fresh/iOS/Backup/:/mnt` — mounts the host backup directory at `/mnt` inside the container.
+- `ghcr.io/mvt-project/mvt` — the MVT container image.
+
+### 3. Inspect the mounted backup
+
+Inside the container:
+
+```
+ls /mnt
+
+```
+
+Identify the correct backup directory before proceeding.
+
+### 4. Decrypt an encrypted backup
+
+```
+mvt-ios decrypt-backup \
+  -p "Password" \
+  -d /home/cases/ \
+  /mnt/00000-0000000/
+
+```
+
+Replace the example password, destination, and backup directory with the appropriate values for your case.
+
+**Parameter overview:**
+
+- `-p` — supplies the backup password.
+- `-d` — specifies the output directory for decrypted backup data.
+- The final argument — identifies the source backup directory.
+
+> 🔐 Avoid placing real passwords directly in shell history or shared documentation. Use a secure method to provide credentials, and restrict access to decrypted output.
+
+---
+
+## ⚠️ Notes and Best Practices
+
+- 🔒 **Authorization:** Examine only devices and backups you own or have explicit permission to investigate.
+- 🧾 **Evidence preservation:** Keep an original copy of the backup unchanged and perform analysis on a working copy.
+- 🔐 **Sensitive data:** Backups, crash reports, logs, pairing records, and Hashcat potfiles can contain private information. Store them securely.
+- 🧰 **Tool compatibility:** Command syntax and available functionality may vary across versions of iOS, `libimobiledevice`, `pymobiledevice3`, MVT, and Hashcat.
+- 🐳 **Docker permissions:** Mounted directories retain host-side permissions and may expose sensitive files to the container.
+- 📝 **Documentation:** Record tool versions, timestamps, commands, and relevant output to make investigations reproducible.
+
+---
+
+## 📚 References
+
+- [Mobile Verification Toolkit (MVT) Documentation](https://docs.mvt.re/en/latest/install/)
+- [MVT GitHub Repository](https://github.com/mvt-project/mvt)
+- [libimobiledevice GitHub Repository](https://github.com/libimobiledevice/libimobiledevice)
+- [pymobiledevice3 GitHub Repository](https://github.com/doronz88/pymobiledevice3)
+- [Hashcat Documentation](https://hashcat.net/wiki/)
+- [Docker Documentation](https://docs.docker.com/)
+
+---
+
+⭐ **Tip:** Keep this README updated as you validate commands against your installed tool versions and testing environment.
